@@ -2,6 +2,7 @@ express = require 'express'
 passport = require 'passport'
 config = require './config'
 routes = require './routes'
+firewalls = require './passport'
 DBController = require './model/database/db_controller'
 logger = require './logger'
 
@@ -82,16 +83,32 @@ module.exports = class Server
   _registerRoutes: ->
     controllers = {}
     for url, route of routes
+      middlewares = @_findPassportMiddlewares(url)
       url = config.server.routePrefix+"/#{url}"
       for method, callback of route
         [controllerName, methodName] = callback.split '#'
         controller = controllers[controllerName] ?= new (require "./controllers/#{controllerName}") @dbController
         logger.info "registering API route '#{method} #{url}'"
-        @express[method] url, passport.authenticate 'token', { session: false } if config.server.oauth
+        @express[method] url, middlewares
         @express[method] url, controller.before
         @express[method] url, do (controller, methodName) ->
           methods = controller[methodName]
           (params...) -> controller[methodName].apply(controller, params)
+
+  # Used to find the middlewares used to protect a certain route.
+  #
+  # @private
+  #
+  _findPassportMiddlewares: (path) ->
+    for pattern, middlewares of firewalls
+      regex = new RegExp('^'+pattern)
+
+      if regex.test '/'+path
+        if typeof middlewares == 'undefined'
+          return []
+        else
+          return middlewares
+    []
 
   # For getting the required server object when running supertest.
   #
